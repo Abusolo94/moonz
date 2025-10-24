@@ -1,48 +1,45 @@
 
 require("dotenv").config()
-const sgMail = require("@sendgrid/mail");
+// const sgMail = require("@sendgrid/mail");
 const nodemailer = require("nodemailer");
-const twilio = require("twilio");
+
 
 const Stripe = require("stripe");
 const { db } = require("../firebaseAdmin");
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
-const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 
-sgMail.setApiKey(process.env.SENDGRID_API_KEY);
-
-const getMail = async (req, res) => {
-  const { fullName, email, message } = req.body;
+// const getMail = async (req, res) => {
+//   const { fullName, email, message } = req.body;
 
 
-  const msg = {
-    to: "rickysolo44@gmail.com", // your email
-    from: 'rickysolo44@gmail.com',
-    replyTo: email,
-    subject: "New property Inquiry",
-    html: `
-      <p><strong>Name:</strong> ${fullName}</p>
-      <p>${message}</p>
-    `,
-  };
+//   const msg = {
+//     to: "rickysolo44@gmail.com", // your email
+//     from: 'rickysolo44@gmail.com',
+//     replyTo: email,
+//     subject: "New property Inquiry",
+//     html: `
+//       <p><strong>Name:</strong> ${fullName}</p>
+//       <p>${message}</p>
+//     `,
+//   };
 
 
 
-  try {
-    await sgMail.send(msg);
-    res.status(200).send("✅ Email sent successfully!");
-  } catch (error) {
-    console.error("opppps", error);
-    res.status(500).send("❌ Failed to send email",);
-  }
-};
+//   try {
+//     await sgMail.send(msg);
+//     res.status(200).send("✅ Email sent successfully!");
+//   } catch (error) {
+//     console.error("opppps", error);
+//     res.status(500).send("❌ Failed to send email",);
+//   }
+// };
 
-const addment = async (req, res) => {
-  console.log("the world is coming to an end"); // test log
-  console.log("Request body:", req.body);       // show what was sent
+// const addment = async (req, res) => {
+//   console.log("the world is coming to an end"); // test log
+//   console.log("Request body:", req.body);       // show what was sent
 
-  res.status(200).json({ message: "Setup is working correctly ✅" });
-};
+//   res.status(200).json({ message: "Setup is working correctly ✅" });
+// };
 
 
 const getStrip = async (req, res) => {
@@ -138,23 +135,23 @@ const addMailer =  async (req, res) => {
 
 
 
-const addSms = async (req, res) => {
-  const { to, message } = req.body;
+// const addSms = async (req, res) => {
+//   const { to, message } = req.body;
 
-  try {
-    const sms = await client.messages.create({
-      body: message,
-      from: process.env.TWILIO_PHONE_NUMBER,
-      to, // example: '+15551234567'
-    });
+//   try {
+//     const sms = await client.messages.create({
+//       body: message,
+//       from: process.env.TWILIO_PHONE_NUMBER,
+//       to, // example: '+15551234567'
+//     });
 
-    console.log("SMS sent:", sms.sid);
-    res.json({ success: true, sid: sms.sid });
-  } catch (error) {
-    console.error("Error sending SMS:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-};
+//     console.log("SMS sent:", sms.sid);
+//     res.json({ success: true, sid: sms.sid });
+//   } catch (error) {
+//     console.error("Error sending SMS:", error);
+//     res.status(500).json({ success: false, error: error.message });
+//   }
+// };
 
 
 const addonePayment = async (req, res) => {
@@ -192,4 +189,4 @@ const addonePayment = async (req, res) => {
 
 
 
-module.exports = {getMail, addment, getStrip, addMailer, addSms, addsub, addonePayment }
+module.exports = {  getStrip, addMailer,  addsub, addonePayment }
