@@ -2,7 +2,14 @@
 const cors = require("cors") ;
 const sgMail = require("@sendgrid/mail") ;
 require("dotenv").config()
+
+const axios = require('axios');
+
+
+
 const sendRouter = require("./routes/sendmail")
+
+const paystackRouter = require("./routes/paystackRoutes")
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const { db,  admin } = require("./firebaseAdmin");
 
@@ -10,9 +17,12 @@ const { db,  admin } = require("./firebaseAdmin");
 
 const app = express();
 app.use(cors({ origin: '*' }));
-// app.use(express.json());
+
 
 app.use('/mails/moonz',  express.json(), sendRouter)
+
+app.use('/mails/moonz',  express.json(), paystackRouter)
+
 
 
 
@@ -118,5 +128,9 @@ app.post(
     }
   }
 );
+
+
+
+
 
 app.listen(4000, () => console.log("Server running on port 4000"));
