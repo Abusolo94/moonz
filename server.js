@@ -10,6 +10,7 @@ const axios = require('axios');
 const sendRouter = require("./routes/sendmail")
 
 const paystackRouter = require("./routes/paystackRoutes")
+const propertPayRoute = require("./routes/paypropertyRoutes")
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const { db,  admin } = require("./firebaseAdmin");
 
@@ -22,6 +23,7 @@ app.use(cors({ origin: '*' }));
 app.use('/mails/moonz',  express.json(), sendRouter)
 
 app.use('/mails/moonz',  express.json(), paystackRouter)
+app.use('/moonz/property',  express.json(), propertPayRoute)
 
 
 

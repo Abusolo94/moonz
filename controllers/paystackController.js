@@ -4,77 +4,106 @@ const axios = require("axios");
 const { db,  admin } = require("../firebaseAdmin");
 
 
-const addpaystack = async (req, res) => {
+ const addpaystack =  async (req, res) => {
   const { reference } = req.params;
 
   try {
-    // Step 1: Verify transaction with Paystack
-    const response = await axios.get(
+    const verifyRes = await axios.get(
       `https://api.paystack.co/transaction/verify/${reference}`,
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-        },
-      }
+      { headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}` } }
     );
 
-    const verification = response.data.data;
+    const transaction = verifyRes.data.data;
 
-    // Step 2: Only store if payment was successful
-    if (verification.status === "success") {
-      const subscriptionData = {
-        userEmail: verification.customer.email,
-        amount: verification.amount / 100, // Convert from kobo to KSh
-        currency: verification.currency,
-        reference: verification.reference,
-        status: verification.status,
-        serviceName: verification.metadata?.serviceName || "Subscription",
-        paymentDate: new Date().toISOString(),
-        gateway: "Paystack",
-      };
-
-      // Step 3: Store in Firestore
-      await db.collection("subscriptions").add(subscriptionData);
-
-      console.log("✅ Subscription stored successfully!");
+    if (transaction.status !== "success") {
+      return res.status(400).json({ error: "Payment not successful" });
     }
 
-    res.status(200).json(response.data);
-  } catch (error) {
-    console.error("❌ Verification Error:", error.message);
-    res.status(400).json({ error: error.message });
+    // Get authorization code from successful transaction
+    const authorizationCode = transaction.authorization?.authorization_code;
+
+    if (!authorizationCode) {
+      return res.status(400).json({ error: "No authorization code found" });
+    }
+
+    // Step 2: Create recurring subscription
+    const subResp = await axios.post(
+      "https://api.paystack.co/subscription",
+      {
+        customer: transaction.customer.email,
+        plan: transaction.metadata.planCode,
+        authorization: authorizationCode,
+      },
+      { headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}` } }
+    );
+
+    const subscription = subResp.data.data;
+
+    const subscriptionData = {
+      planName: subscription.name || "Default Plan",
+      code: subscription.plan_code || null,
+      subscription_code: subscription.subscription_code || null,
+      email_token: subscription.email_token || null,
+      status: subscription.status,
+      amount: subscription.amount / 100 || 0,
+      currency: subscription.currency || "N/A",
+      createdAt: admin.firestore.Timestamp.now(),
+      gateway: "Paystack",
+    };
+
+    // Attach to user doc
+    const userQuery = await db.collection("users").where("email", "==", transaction.customer.email).limit(1).get();
+    if (!userQuery.empty) {
+      const userDoc = userQuery.docs[0].ref;
+      await userDoc.set(
+        { subscriptions: admin.firestore.FieldValue.arrayUnion(subscriptionData) },
+        { merge: true }
+      );
+    }
+
+    // Optional: store globally for admin analytics
+    await db.collection("subscriptions").add({ userEmail: transaction.customer.email, ...subscriptionData });
+
+    res.status(200).json({ success: true, subscription: subscriptionData });
+
+  } catch (err) {
+    console.error("❌ Paystack verify/subscription error:", err.response?.data || err.message);
+    res.status(400).json({ error: err.response?.data || err.message });
   }
 };
 
 
 
-const paystackSub = async (req, res) => {
+
+const paystackSub = async(req, res) => {
   const { email, planCode } = req.body;
 
+  if (!email || !planCode) {
+    return res.status(400).json({ error: "Email and planCode are required" });
+  }
+
   try {
-    const response = await axios.post(
+    // Step 1: Initialize a minimal payment to collect card details
+    const init = await axios.post(
       "https://api.paystack.co/transaction/initialize",
       {
         email,
-        amount: 5000 * 100, // amount in kobo
-        plan: planCode,     // your Paystack plan code
-        callback_url: `${process.env.CLIENT_URL}/stacksuccess`, // ✅ inside body
+        amount: 50, // minimal amount in kobo to collect card
+        metadata: { planCode },
+        callback_url: `${process.env.CLIENT_URL}/stacksuccess`, // frontend page
       },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-        },
-      }
+      { headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}` } }
     );
 
-    res.status(200).json(response.data);
-  } catch (error) {
-    console.error("Paystack error:", error.response?.data || error.message);
-    res.status(400).json({ error: error.message });
+    res.status(200).json({
+      success: true,
+      authorization_url: init.data.data.authorization_url,
+    });
+  } catch (err) {
+    console.error("❌ Paystack initialize error:", err.response?.data || err.message);
+    res.status(400).json({ error: err.response?.data || err.message });
   }
 };
-
-
 
 
 
@@ -105,51 +134,165 @@ const stackonepay =  async (req, res) => {
   }
 };
 
-
-
-const checkSub = async (req, res) => {
+const landPay =  async (req, res) => {
+  const { email, amount, serviceName } = req.body; // amount in Naira
   try {
-    const { email } = req.params;
+    const response = await axios.post(
+      "https://api.paystack.co/transaction/initialize",
+      {
+        email,
+        amount: amount * 100, // convert to kobo
+        metadata: {
+          serviceName,
+        },
+        callback_url: `${process.env.CLIENT_URL}/landsuccesspay`, // replace with your frontend success URL
+      },
 
-    // 🔍 Find user's latest subscription/payment record
-    const snapshot = await db
-      .collection("subscriptions")
-      .where("userEmail", "==", email)
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+        },
+      }
+    );
+    res.status(200).json(response.data);
+  } catch (err) {
+    console.error(err.response?.data || err.message);
+    res.status(400).json({ error: err.message });
+  }
+};
+
+const hotelPay =  async (req, res) => {
+  const { email, amount, serviceName } = req.body; // amount in Naira
+  try {
+    const response = await axios.post(
+      "https://api.paystack.co/transaction/initialize",
+      {
+        email,
+        amount: amount * 100, // convert to kobo
+        metadata: {
+          serviceName,
+        },
+        callback_url: `${process.env.CLIENT_URL}/hotelsuccesspay`, // replace with your frontend success URL
+      },
+
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+        },
+      }
+    );
+    res.status(200).json(response.data);
+  } catch (err) {
+    console.error(err.response?.data || err.message);
+    res.status(400).json({ error: err.message });
+  }
+};
+
+const commerncialPay =  async (req, res) => {
+  const { email, amount, serviceName } = req.body; // amount in Naira
+  try {
+    const response = await axios.post(
+      "https://api.paystack.co/transaction/initialize",
+      {
+        email,
+        amount: amount * 100, // convert to kobo
+        metadata: {
+          serviceName,
+        },
+        callback_url: `${process.env.CLIENT_URL}/commerncialsucesspay`, // replace with your frontend success URL
+      },
+
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+        },
+      }
+    );
+    res.status(200).json(response.data);
+  } catch (err) {
+    console.error(err.response?.data || err.message);
+    res.status(400).json({ error: err.message });
+  }
+};
+
+
+ const checkSub =  async (req, res) => {
+  const { email } = req.params;
+
+  try {
+    const userSnapshot = await db
+      .collection("users")
+      .where("email", "==", email)
       .limit(1)
       .get();
 
-    if (snapshot.empty) {
-      return res.status(200).json({ hasActiveSubscription: false });
+    if (userSnapshot.empty) {
+      return res.json({ hasActiveSubscription: false });
     }
 
-    const doc = snapshot.docs[0].data();
+    const userData = userSnapshot.docs[0].data();
+    const hasActiveSubscription =
+      userData.subscriptions?.some(sub => sub.status === "active") || false;
 
-    // ✅ Define "active" based on status and recent payment
-    const isSuccess = doc.status === "success";
-    const paymentDate = new Date(doc.paymentDate);
-    const now = new Date();
+    return res.json({ hasActiveSubscription });
+  } catch (error) {
+    console.error("❌ Error checking subscription:", error);
+    res.status(500).json({ hasActiveSubscription: false });
+  }
+};
 
-    // You can define how long a subscription lasts (e.g., 30 days)
-    const isRecent =
-      (now - paymentDate) / (1000 * 60 * 60 * 24) <= 30; // 30 days validity
+const cancleSub =  async (req, res) => {
+  const { code, token, userId } = req.body;
+  const requesterId = req.user.uid; // from authMiddleware
 
-    const isActive = isSuccess && isRecent;
+  try {
+    // Check if requester is super admin
+    const requesterDoc = await db.collection("users").doc(requesterId).get();
+    const requesterRole = requesterDoc.data()?.role;
 
-    res.status(200).json({
-      hasActiveSubscription: isActive,
-      status: doc.status,
-      reference: doc.reference,
-      serviceName: doc.serviceName,
-      amount: doc.amount,
-      currency: doc.currency,
-      paymentDate: doc.paymentDate,
+    // Allow if user cancels their own OR super admin
+    if (requesterId !== userId && requesterRole !== "super_admin") {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+
+    // Call Paystack API
+    const response = await axios.post(
+      "https://api.paystack.co/subscription/disable",
+      { code, token },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    // Update Firestore
+    await db
+      .collection("users")
+      .doc(userId)
+      .update({
+        subscriptions: admin.firestore.FieldValue.arrayRemove({
+          code,
+          token,
+        }),
+      });
+
+    res.json({
+      success: true,
+      message: "Subscription cancelled successfully",
+      data: response.data,
     });
   } catch (error) {
-    console.error("❌ Error fetching subscription:", error);
-    res.status(500).json({ error: error.message });
+    console.error("Cancel error:", error.response?.data || error.message);
+    res.status(400).json({
+      success: false,
+      message: "Failed to cancel subscription",
+      error: error.response?.data,
+    });
   }
 };
 
 
 
-module.exports = {addpaystack, paystackSub, stackonepay, checkSub};
+module.exports = {addpaystack, paystackSub, stackonepay, checkSub, landPay, commerncialPay, hotelPay, cancleSub};
