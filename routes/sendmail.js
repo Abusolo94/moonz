@@ -4,7 +4,7 @@ const { getStrip, addMailer,  addsub, addonePayment} = require("../controllers/s
 
 
  router.post("/create-checkout-session", getStrip)
- router.post("/send-email", addMailer)
+ router.post("/sendemail", addMailer)
 
  router.get("/subscription-status/:email", addsub)
  router.post("/createonetime", addonePayment )

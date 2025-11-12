@@ -1,45 +1,18 @@
 
 require("dotenv").config()
-// const sgMail = require("@sendgrid/mail");
 const nodemailer = require("nodemailer");
-
-
 const Stripe = require("stripe");
-const { db } = require("../firebaseAdmin");
+const { db, admin } = require("../firebaseAdmin");
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
-// const getMail = async (req, res) => {
-//   const { fullName, email, message } = req.body;
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.EMAIL_USER, // your Gmail
+    pass: process.env.EMAIL_PASS, // your App Password
+  },
+});
 
-
-//   const msg = {
-//     to: "rickysolo44@gmail.com", // your email
-//     from: 'rickysolo44@gmail.com',
-//     replyTo: email,
-//     subject: "New property Inquiry",
-//     html: `
-//       <p><strong>Name:</strong> ${fullName}</p>
-//       <p>${message}</p>
-//     `,
-//   };
-
-
-
-//   try {
-//     await sgMail.send(msg);
-//     res.status(200).send("✅ Email sent successfully!");
-//   } catch (error) {
-//     console.error("opppps", error);
-//     res.status(500).send("❌ Failed to send email",);
-//   }
-// };
-
-// const addment = async (req, res) => {
-//   console.log("the world is coming to an end"); // test log
-//   console.log("Request body:", req.body);       // show what was sent
-
-//   res.status(200).json({ message: "Setup is working correctly ✅" });
-// };
 
 
 const getStrip = async (req, res) => {
@@ -97,61 +70,68 @@ const getStrip = async (req, res) => {
 
 
 
-const addMailer =  async (req, res) => {
-  const { name, email, message } = req.body;
+const addMailer = async (req, res) => {
+  const { providerId, message } = req.body;
+  const idToken = req.headers.authorization?.split("Bearer ")[1];
+
+  if (!idToken) {
+    return res.status(401).json({ success: false, error: "Unauthorized" });
+  }
 
   try {
-    // Create transporter
-    const transporter = nodemailer.createTransport({
-      service: "gmail", // you can use 'hotmail', 'yahoo', etc.
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    });
+    // 1️⃣ Verify sender
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    const senderUid = decoded.uid;
+    const senderDoc = await admin.firestore().doc(`users/${senderUid}`).get();
+    const sender = senderDoc.data();
 
+    // 2️⃣ Get provider info     
+    const providerDoc = await admin.firestore().doc(`users/${providerId}`).get();
+    if (!providerDoc.exists) {
+      return res.status(404).json({ success: false, error: "Provider not found" });
+    }
+ 
+    const provider = providerDoc.data();
+    if (!provider.allowContact) {
+      return res.status(403).json({ success: false, error: "Provider does not accept messages" });
+    }
 
-    // Email options
+    // 3️⃣ Send email
     const mailOptions = {
-      from: `"${name}" <${process.env.EMAIL_USER}>`,
-      to: "rickysolo44@gmail.com",
-      subject: "11moonz real estate",
+      from: `"${sender.displayName || sender.email}" <${process.env.EMAIL_USER}>`,
+      to: provider.email,
+      subject: `New inquiry from ${sender.displayName || sender.email}`,
       html: `
-        <h3>New Message from ${name}</h3>
-        <p><b>Email:</b> ${email}</p>
-        <p><b>Message:</b></p>
-        <p>${message}</p>
+        <h3>Hello ${provider.displayName || "Service Provider"},</h3>
+        <p>You have a new inquiry from <b>${sender.displayName || sender.email}</b>:</p>
+        <blockquote>${message}</blockquote>
+        <p>Reply directly to this email to contact the user.</p>
+        <hr/>
+        <small>11Moonz Real Estate Platform</small>
       `,
     };
 
-    // Send email
     await transporter.sendMail(mailOptions);
-    res.status(200).json({ success: true, message: "Email sent successfully" });
+
+    // 4️⃣ Optional log
+    await admin.firestore().collection("messages").add({
+      from: senderUid,
+      to: providerId,
+      message,
+      sentAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    res.status(200).json({ success: true, message: "Email sent successfully." });
   } catch (error) {
-    console.error(error);
+    console.error("Error sending provider email:", error);
     res.status(500).json({ success: false, error: "Failed to send email" });
   }
 };
 
 
 
-// const addSms = async (req, res) => {
-//   const { to, message } = req.body;
 
-//   try {
-//     const sms = await client.messages.create({
-//       body: message,
-//       from: process.env.TWILIO_PHONE_NUMBER,
-//       to, // example: '+15551234567'
-//     });
 
-//     console.log("SMS sent:", sms.sid);
-//     res.json({ success: true, sid: sms.sid });
-//   } catch (error) {
-//     console.error("Error sending SMS:", error);
-//     res.status(500).json({ success: false, error: error.message });
-//   }
-// };
 
 
 const addonePayment = async (req, res) => {

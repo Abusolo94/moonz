@@ -11,6 +11,7 @@ const sendRouter = require("./routes/sendmail")
 
 const paystackRouter = require("./routes/paystackRoutes")
 const propertPayRoute = require("./routes/paypropertyRoutes")
+const emailRouter = require("./routes/sendmailroute")
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const { db,  admin } = require("./firebaseAdmin");
 
@@ -22,7 +23,9 @@ app.use(cors({ origin: '*' }));
 
 app.use('/mails/moonz',  express.json(), sendRouter)
 
-app.use('/mails/moonz',  express.json(), paystackRouter)
+app.use('/moonz/email',  express.json(), emailRouter)
+
+app.use('/noonz/paystack',  express.json(), paystackRouter)
 app.use('/moonz/property',  express.json(), propertPayRoute)
 
 
